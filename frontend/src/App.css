@@ -1,0 +1,142 @@
+.app {
+  display: flex;
+  flex-direction: column;
+  height: var(--app-height, 100dvh);
+  min-height: 100dvh;
+}
+
+.app-header {
+  background: #1a1a1a;
+  border-bottom: 1px solid #2a2a2a;
+  padding: 0 1.5rem;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  justify-content: space-between;
+}
+
+.header-content {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.logo {
+  font-size: 1.3rem;
+}
+
+.app-header h1 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #fff;
+}
+
+.model-badge {
+  background: #2d2d5e;
+  color: #a78bfa;
+  font-size: 0.72rem;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid #3d3d7e;
+}
+
+.auth-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.header-btn {
+  background: transparent;
+  border: 1px solid #383838;
+  color: #d4d4d4;
+  border-radius: 10px;
+  font-size: 0.82rem;
+  padding: 0.4rem 0.7rem;
+  cursor: pointer;
+}
+
+.header-btn:hover {
+  border-color: #5a5a5a;
+  color: #ffffff;
+}
+
+.header-btn.secondary {
+  border-color: #2f2f2f;
+}
+
+.app-main {
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+  position: relative;
+}
+
+.auth-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 10, 10, 0.72);
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  z-index: 20;
+}
+
+.auth-modal {
+  position: relative;
+  width: min(460px, 100%);
+}
+
+.auth-modal .auth-wrap {
+  padding: 0;
+}
+
+.auth-modal-close {
+  position: absolute;
+  top: 0.9rem;
+  right: 0.9rem;
+  z-index: 2;
+  border: 1px solid #3a3a3a;
+  background: #171717;
+  color: #ddd;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.auth-modal-close:hover {
+  border-color: #5a5a5a;
+  color: #fff;
+}
+
+@media (max-width: 768px) {
+  .app-header {
+    height: 52px;
+    padding: 0 0.9rem;
+  }
+
+  .app-header h1 {
+    font-size: 1rem;
+  }
+
+  .model-badge {
+    font-size: 0.68rem;
+    padding: 2px 7px;
+  }
+
+  .header-btn {
+    font-size: 0.74rem;
+    padding: 0.3rem 0.55rem;
+  }
+
+  .auth-actions {
+    gap: 0.35rem;
+  }
+
+  .auth-modal {
+    width: 100%;
+  }
+}

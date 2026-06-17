@@ -1,0 +1,65 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chatbot-backend
+  namespace: chatbot
+  labels:
+    app: chatbot-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chatbot-backend
+  template:
+    metadata:
+      labels:
+        app: chatbot-backend
+    spec:
+      containers:
+        - name: backend
+          image: chatbot-backend:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8000
+          env:
+            - name: OLLAMA_BASE_URL
+              value: "__OLLAMA_BASE_URL__"
+            - name: OLLAMA_MODEL
+              value: "__OLLAMA_MODEL__"
+            - name: OLLAMA_NUM_GPU
+              value: "0"
+            - name: IDENTITY_BASE_URL
+              value: "http://identity-api.identity.svc.cluster.local:8080"
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: chatbot-backend
+  namespace: chatbot
+spec:
+  selector:
+    app: chatbot-backend
+  ports:
+    - port: 8000
+      targetPort: 8000
+  type: ClusterIP

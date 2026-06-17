@@ -1,0 +1,50 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chatbot-frontend
+  namespace: chatbot
+  labels:
+    app: chatbot-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chatbot-frontend
+  template:
+    metadata:
+      labels:
+        app: chatbot-frontend
+    spec:
+      containers:
+        - name: frontend
+          image: chatbot-frontend:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: chatbot-frontend
+  namespace: chatbot
+spec:
+  selector:
+    app: chatbot-frontend
+  ports:
+    - port: 80
+      targetPort: 80
+  type: ClusterIP
