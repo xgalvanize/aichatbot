@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import './Chat.css'
 
-const WELCOME = 'Hello! I\'m Qwen2.5 3B, your AI assistant. How can I help you today?'
+const WELCOME = 'Hello! I\'m Gemma 3n E4B, your AI assistant. How can I help you today?'
 
 export default function Chat({ accessToken, onAuthExpired }) {
   const [messages, setMessages] = useState([
@@ -10,6 +10,7 @@ export default function Chat({ accessToken, onAuthExpired }) {
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)
   const [error, setError] = useState(null)
+  const [copiedCodeIndex, setCopiedCodeIndex] = useState(null)
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
   const abortRef = useRef(null)
@@ -140,6 +141,31 @@ export default function Chat({ accessToken, onAuthExpired }) {
     }
   }
 
+  const extractCodeBlocks = (text) => {
+    const matches = [...text.matchAll(/```[^\n]*\n?([\s\S]*?)```/g)]
+    if (!matches.length) return ''
+    return matches
+      .map((match) => match[1].replace(/\n$/, ''))
+      .join('\n\n')
+      .trim()
+  }
+
+  const handleCopyCode = async (content, index) => {
+    const codeOnly = extractCodeBlocks(content)
+    if (!codeOnly) {
+      setError('No fenced code blocks found in this response.')
+      return
+    }
+
+    try {
+      await navigator.clipboard.writeText(codeOnly)
+      setCopiedCodeIndex(index)
+      setTimeout(() => setCopiedCodeIndex((prev) => (prev === index ? null : prev)), 1800)
+    } catch {
+      setError('Could not copy code to clipboard.')
+    }
+  }
+
   return (
     <div className="chat">
       <div className="messages-wrapper">
@@ -149,12 +175,23 @@ export default function Chat({ accessToken, onAuthExpired }) {
               <div className="avatar">
                 {msg.role === 'assistant' ? '🤖' : '🧑'}
               </div>
-              <div className="bubble">
-                {msg.content || (streaming && i === messages.length - 1 ? (
-                  <span className="cursor-blink">▍</span>
-                ) : null)}
-                {streaming && i === messages.length - 1 && msg.content && (
-                  <span className="cursor-blink">▍</span>
+              <div className="message-content">
+                <div className="bubble">
+                  {msg.content || (streaming && i === messages.length - 1 ? (
+                    <span className="cursor-blink">▍</span>
+                  ) : null)}
+                  {streaming && i === messages.length - 1 && msg.content && (
+                    <span className="cursor-blink">▍</span>
+                  )}
+                </div>
+                {msg.role === 'assistant' && /```/.test(msg.content) && (
+                  <button
+                    className="copy-code-btn"
+                    onClick={() => handleCopyCode(msg.content, i)}
+                    type="button"
+                  >
+                    {copiedCodeIndex === i ? 'Copied' : 'Copy code'}
+                  </button>
                 )}
               </div>
             </div>

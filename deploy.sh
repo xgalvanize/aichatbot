@@ -18,8 +18,7 @@ BACKEND_IMAGE="chatbot-backend:latest"
 IDENTITY_IMAGE="chatbot-identity:latest"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-K8S_DIR="${REPO_ROOT}/k8s"
+K8S_DIR="${SCRIPT_DIR}/k8s"
 
 echo "================================================"
 echo " Chatbot Deploy Script"
@@ -129,15 +128,15 @@ fi
 
 # ── Build images ───────────────────────────────────────────────────────────────
 echo "▶ Building frontend image..."
-docker build -t "${FRONTEND_IMAGE}" "${REPO_ROOT}/frontend"
+docker build -t "${FRONTEND_IMAGE}" "${SCRIPT_DIR}/frontend"
 
 echo ""
 echo "▶ Building backend image..."
-docker build -t "${BACKEND_IMAGE}" "${REPO_ROOT}/backend"
+docker build -t "${BACKEND_IMAGE}" "${SCRIPT_DIR}/backend"
 
 echo ""
 echo "▶ Building identity image..."
-docker build -t "${IDENTITY_IMAGE}" "${REPO_ROOT}/identity"
+docker build -t "${IDENTITY_IMAGE}" "${SCRIPT_DIR}/identity"
 
 # ── Load images into remote k3s runtime (no registry) ─────────────────────────
 echo ""

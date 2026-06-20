@@ -38,11 +38,32 @@ app.add_middleware(
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
 # Ollama model tag to use for every chat request. Overridable per-request.
-DEFAULT_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
+DEFAULT_MODEL = os.getenv("OLLAMA_MODEL", "gemma3n:e4b")
 
 # Number of model layers to offload to GPU. 0 = CPU-only, which is more stable
 # on older / low-VRAM GPUs (e.g. GT 740). Increase if the hardware supports it.
 OLLAMA_NUM_GPU = int(os.getenv("OLLAMA_NUM_GPU", "0"))
+
+# Disable model "thinking" traces by default so streamed output appears as
+# user-visible content tokens instead of hidden reasoning tokens.
+OLLAMA_THINK = os.getenv("OLLAMA_THINK", "false").strip().lower() in {"1", "true", "yes", "on"}
+
+# Keep responses focused while still allowing useful depth.
+DEFAULT_SYSTEM_PROMPT = os.getenv(
+    "CHATBOT_SYSTEM_PROMPT",
+    (
+        "You are a helpful assistant. Provide clear, practical answers with enough detail "
+        "to be useful. Prefer concise structure (short paragraphs or bullets) instead of "
+        "rambling. Do not output internal reasoning or self-talk. If the user asks for "
+        "a short or exact reply, comply exactly."
+    ),
+)
+
+# Balanced decoding defaults for older hardware: richer answers without a big
+# latency jump compared with very short outputs.
+OLLAMA_TEMPERATURE = float(os.getenv("OLLAMA_TEMPERATURE", "0.35"))
+OLLAMA_TOP_P = float(os.getenv("OLLAMA_TOP_P", "0.92"))
+OLLAMA_NUM_PREDICT = int(os.getenv("OLLAMA_NUM_PREDICT", "384"))
 
 
 # Incoming chat request body. `messages` follows the OpenAI-style role/content
@@ -91,15 +112,25 @@ async def chat(payload: ChatRequest):
         async def pump_ollama():
             """Read streaming lines from Ollama and forward them onto the queue."""
             try:
+                messages = payload.messages
+                if DEFAULT_SYSTEM_PROMPT and not any(m.get("role") == "system" for m in messages):
+                    messages = [{"role": "system", "content": DEFAULT_SYSTEM_PROMPT}, *messages]
+
                 async with httpx.AsyncClient(timeout=None) as client:
                     async with client.stream(
                         "POST",
                         f"{OLLAMA_BASE_URL}/api/chat",
                         json={
                             "model": payload.model,
-                            "messages": payload.messages,
+                            "messages": messages,
                             "stream": True,
-                            "options": {"num_gpu": OLLAMA_NUM_GPU},
+                            "think": OLLAMA_THINK,
+                            "options": {
+                                "num_gpu": OLLAMA_NUM_GPU,
+                                "temperature": OLLAMA_TEMPERATURE,
+                                "top_p": OLLAMA_TOP_P,
+                                "num_predict": OLLAMA_NUM_PREDICT,
+                            },
                         },
                     ) as response:
                         if response.status_code != 200:

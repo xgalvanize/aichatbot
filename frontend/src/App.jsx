@@ -101,8 +101,8 @@ function App() {
       <header className="app-header">
         <div className="header-content">
           <span className="logo">⚡</span>
-          <h1>Qwen Chat</h1>
-          <span className="model-badge">qwen2.5:3b</span>
+          <h1>Gemma Chat</h1>
+          <span className="model-badge">gemma3n:e4b</span>
         </div>
         <div className="auth-actions">
           {authTokens ? (

@@ -33,6 +33,17 @@
   flex-direction: row-reverse;
 }
 
+.message-content {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.45rem;
+}
+
+.message-row.user .message-content {
+  align-items: flex-end;
+}
+
 .avatar {
   font-size: 1.3rem;
   flex-shrink: 0;
@@ -61,6 +72,24 @@
   border: 1px solid #5b21b6;
   border-top-right-radius: 4px;
   color: #f0e6ff;
+}
+
+.copy-code-btn {
+  background: transparent;
+  border: 1px solid #3b3b4f;
+  color: #bcbcd1;
+  border-radius: 0.55rem;
+  font-size: 0.75rem;
+  line-height: 1;
+  padding: 0.35rem 0.55rem;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.copy-code-btn:hover {
+  border-color: #6b6b91;
+  color: #f1f1ff;
+  background: #232338;
 }
 
 @keyframes blink {
