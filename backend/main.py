@@ -1,9 +1,7 @@
 """
 Chatbot backend — FastAPI service that proxies chat requests to a local Ollama instance.
-
 Request flow:
   Browser → Nginx (frontend) → /api/* reverse-proxy → this service → Ollama HTTP API
-
 Key design choices:
   - Responses are streamed as Server-Sent Events (SSE) so tokens appear in the UI
     immediately as the model generates them.
@@ -14,18 +12,23 @@ Key design choices:
   - num_gpu is configurable via OLLAMA_NUM_GPU (default 0 = CPU-only) to avoid
     instability on older GPU hardware such as the GT 740.
 """
-
 import os
+import re
 import json
 import asyncio
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
+limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(title="Chatbot API")
-
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -38,7 +41,7 @@ app.add_middleware(
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
 # Ollama model tag to use for every chat request. Overridable per-request.
-DEFAULT_MODEL = os.getenv("OLLAMA_MODEL", "gemma3n:e4b")
+DEFAULT_MODEL = os.getenv("OLLAMA_MODEL", "phi4-mini")
 
 # Number of model layers to offload to GPU. 0 = CPU-only, which is more stable
 # on older / low-VRAM GPUs (e.g. GT 740). Increase if the hardware supports it.
@@ -65,13 +68,45 @@ OLLAMA_TEMPERATURE = float(os.getenv("OLLAMA_TEMPERATURE", "0.35"))
 OLLAMA_TOP_P = float(os.getenv("OLLAMA_TOP_P", "0.92"))
 OLLAMA_NUM_PREDICT = int(os.getenv("OLLAMA_NUM_PREDICT", "384"))
 
-
 # Incoming chat request body. `messages` follows the OpenAI-style role/content
 # format that Ollama accepts directly. `model` defaults to DEFAULT_MODEL but can
 # be overridden by the client (e.g. for a model-selector UI).
+
+_CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+MAX_MESSAGE_LENGTH = 4000
+MAX_MESSAGES = 40
+ALLOWED_ROLES = {"user", "assistant", "system"}
+
+
 class ChatRequest(BaseModel):
     messages: list[dict]
     model: str = DEFAULT_MODEL
+
+    @field_validator("messages")
+    @classmethod
+    def validate_messages(cls, messages: list[dict]) -> list[dict]:
+        if not messages:
+            raise ValueError("messages must not be empty")
+        if len(messages) > MAX_MESSAGES:
+            raise ValueError(f"too many messages (max {MAX_MESSAGES})")
+        cleaned = []
+        for msg in messages:
+            role = str(msg.get("role", "")).strip()
+            content = str(msg.get("content", ""))
+            if role not in ALLOWED_ROLES:
+                raise ValueError(f"invalid role '{role}'")
+            content = _CONTROL_CHAR_RE.sub("", content)
+            if len(content) > MAX_MESSAGE_LENGTH:
+                content = content[:MAX_MESSAGE_LENGTH]
+            cleaned.append({"role": role, "content": content})
+        return cleaned
+
+    @field_validator("model")
+    @classmethod
+    def validate_model(cls, v: str) -> str:
+        if not re.match(r"^[\w.:\-]{1,100}$", v):
+            raise ValueError("invalid model name")
+        return v
 
 
 @app.get("/api/health")
@@ -81,7 +116,8 @@ async def health():
 
 
 @app.post("/api/chat")
-async def chat(payload: ChatRequest):
+@limiter.limit("10/minute")
+async def chat(request: Request, payload: ChatRequest):
     """
     Stream a chat completion from Ollama as Server-Sent Events.
 
@@ -95,7 +131,6 @@ async def chat(payload: ChatRequest):
     Keepalive comments (': keepalive') are injected every 20 s of model
     silence to prevent proxy idle-timeout 524 errors from Cloudflare.
     """
-
     async def stream_response():
         # Send an early byte so upstream proxies do not time out waiting.
         yield ": stream-open\n\n"
@@ -104,6 +139,7 @@ async def chat(payload: ChatRequest):
         # SSE generator coroutine.  kind is "line" (a raw JSON token line) or
         # "error" (a plain-text error message).
         queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
+
         # done is set by pump_ollama when the Ollama stream is fully consumed or
         # has errored, signalling the SSE loop to flush remaining queue items
         # and then close the response.
@@ -136,7 +172,6 @@ async def chat(payload: ChatRequest):
                         if response.status_code != 200:
                             await queue.put(("error", f"Ollama returned {response.status_code}"))
                             return
-
                         async for line in response.aiter_lines():
                             if line:
                                 await queue.put(("line", line))
@@ -158,6 +193,7 @@ async def chat(payload: ChatRequest):
         # Start the Ollama reader as a concurrent task so the SSE generator
         # can yield keepalives while waiting for the model to produce tokens.
         pump_task = asyncio.create_task(pump_ollama())
+
         try:
             while True:
                 try:

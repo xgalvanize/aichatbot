@@ -1,8 +1,4 @@
 ---
-# Cloudflare "Try It" tunnel — no account or domain needed.
-# The tunnel URL (*.trycloudflare.com) is printed to the pod logs on startup.
-# View it with:
-#   kubectl logs -n chatbot -l app=chatbot-cloudflared -f
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -27,8 +23,17 @@ spec:
           args:
             - tunnel
             - --no-autoupdate
+            - run
+            - --token
+            - $(CLOUDFLARE_TUNNEL_TOKEN)
             - --url
-            - http://chatbot-frontend:80
+            - http://chatbot-frontend.chatbot.svc.cluster.local:80
+          env:
+            - name: CLOUDFLARE_TUNNEL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: cloudflared-credentials
+                  key: token
           resources:
             requests:
               cpu: "50m"

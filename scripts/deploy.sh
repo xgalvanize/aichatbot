@@ -1,22 +1,20 @@
 #!/usr/bin/env bash
 # deploy.sh — Build locally, load into remote k3s, and deploy chatbot
-# Usage: ./deploy.sh
+# Usage: ./scripts/deploy.sh
 # Optional overrides:
-#   OLLAMA_BASE_URL=http://10.0.0.141:11434 KUBECONFIG_PATH=/home/borg/.kube/k3s-remote NODE_SSH_HOST=thunderball ./deploy.sh
+#   OLLAMA_BASE_URL=http://10.0.0.141:11434 KUBECONFIG_PATH=/home/borg/.kube/k3s-remote NODE_SSH_HOST=thunderball ./scripts/deploy.sh
 
 set -euo pipefail
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://10.0.0.141:11434}"
-OLLAMA_MODEL="${OLLAMA_MODEL:-gemma3n:e4b}"
+OLLAMA_MODEL="${OLLAMA_MODEL:-phi4-mini}"
 KUBECONFIG_PATH="${KUBECONFIG_PATH:-/home/borg/.kube/k3s-remote}"
 NODE_SSH_HOST="${NODE_SSH_HOST:-thunderball}"
 KUBECTL=(kubectl --kubeconfig "${KUBECONFIG_PATH}")
-
 FRONTEND_IMAGE="chatbot-frontend:latest"
 BACKEND_IMAGE="chatbot-backend:latest"
 IDENTITY_IMAGE="chatbot-identity:latest"
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 K8S_DIR="${REPO_ROOT}/k8s"
@@ -98,18 +96,17 @@ EOF
 
         rm -f "${wd_script}" "${wd_service}" "${wd_timer}"
 }
-
 ensure_ollama_watchdog
 
 ensure_ollama_model() {
-    echo "▶ Ensuring Ollama model ${OLLAMA_MODEL} exists on ${NODE_SSH_HOST}..."
-    ssh "${NODE_SSH_HOST}" "ollama show '${OLLAMA_MODEL}' >/dev/null 2>&1 || ollama pull '${OLLAMA_MODEL}'"
+	echo "▶ Ensuring Ollama model ${OLLAMA_MODEL} exists on ${NODE_SSH_HOST}..."
+	ssh "${NODE_SSH_HOST}" "ollama show '${OLLAMA_MODEL}' >/dev/null 2>&1 || ollama pull '${OLLAMA_MODEL}'"
 }
 
 ensure_ollama_model
 
 probe_ollama_chat() {
-    ssh "${NODE_SSH_HOST}" "curl -fsS --max-time 120 -H 'Content-Type: application/json' -X POST '${OLLAMA_BASE_URL}/api/chat' -d '{\"model\":\"${OLLAMA_MODEL}\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with the single word: pong\"}],\"stream\":false,\"options\":{\"num_predict\":8}}' | grep -q '\"done\":true'"
+	ssh "${NODE_SSH_HOST}" "curl -fsS --max-time 120 -H 'Content-Type: application/json' -X POST '${OLLAMA_BASE_URL}/api/chat' -d '{\"model\":\"${OLLAMA_MODEL}\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with the single word: pong\"}],\"stream\":false,\"options\":{\"num_predict\":8}}' | grep -q '\"done\":true'"
 }
 
 echo "▶ Checking Ollama chat health on ${NODE_SSH_HOST}..."
@@ -118,7 +115,6 @@ if probe_ollama_chat; then
 else
     echo "⚠ Ollama health check failed. Restarting Ollama service..."
     ssh -t "${NODE_SSH_HOST}" 'sudo systemctl restart ollama'
-
     echo "▶ Rechecking Ollama chat health..."
     if ! probe_ollama_chat; then
         echo "✖ Ollama is still unhealthy after restart. Fix Ollama on ${NODE_SSH_HOST} and rerun deploy."
@@ -127,7 +123,8 @@ else
     echo "✓ Ollama recovered after restart"
 fi
 
-# ── Build images ───────────────────────────────────────────────────────────────
+# ── Build images locally ───────────────────────────────────────────────────────
+echo ""
 echo "▶ Building frontend image..."
 docker build -t "${FRONTEND_IMAGE}" "${REPO_ROOT}/frontend"
 
@@ -142,7 +139,6 @@ docker build -t "${IDENTITY_IMAGE}" "${REPO_ROOT}/identity"
 # ── Load images into remote k3s runtime (no registry) ─────────────────────────
 echo ""
 echo "▶ Loading images into k3s on ${NODE_SSH_HOST}..."
-
 LOCAL_ARCHIVE="$(mktemp /tmp/chatbot-images-XXXXXX.tar)"
 REMOTE_ARCHIVE="/tmp/$(basename "${LOCAL_ARCHIVE}")"
 
@@ -166,9 +162,9 @@ echo "▶ Applying Kubernetes manifests..."
 
 # Apply remaining manifests with OLLAMA_BASE_URL substituted
 for manifest in backend.yaml frontend.yaml cloudflared.yaml; do
-    sed -e "s|__OLLAMA_BASE_URL__|${OLLAMA_BASE_URL}|g" \
-    -e "s|__OLLAMA_MODEL__|${OLLAMA_MODEL}|g" \
-        "${K8S_DIR}/${manifest}" | "${KUBECTL[@]}" apply -f -
+	sed -e "s|__OLLAMA_BASE_URL__|${OLLAMA_BASE_URL}|g" \
+	-e "s|__OLLAMA_MODEL__|${OLLAMA_MODEL}|g" \
+		"${K8S_DIR}/${manifest}" | "${KUBECTL[@]}" apply -f -
 done
 
 "${KUBECTL[@]}" apply -f "${K8S_DIR}/identity-mongodb.yaml"
@@ -178,7 +174,7 @@ done
 # Force app pods to pick up freshly imported local images (latest tag).
 "${KUBECTL[@]}" -n chatbot rollout restart deployment/chatbot-backend
 "${KUBECTL[@]}" -n chatbot rollout restart deployment/chatbot-frontend
-# Intentionally do not restart cloudflared so the quick tunnel URL stays stable.
+"${KUBECTL[@]}" -n chatbot rollout restart deployment/chatbot-cloudflared
 "${KUBECTL[@]}" -n identity rollout restart deployment/identity-api
 
 # ── Wait for rollout ───────────────────────────────────────────────────────────
@@ -190,22 +186,16 @@ echo "▶ Waiting for deployments to be ready..."
 "${KUBECTL[@]}" rollout status statefulset/mongodb -n identity --timeout=180s
 "${KUBECTL[@]}" rollout status deployment/identity-api -n identity --timeout=180s
 
-# ── Print tunnel URL ───────────────────────────────────────────────────────────
+# ── Deployment summary ─────────────────────────────────────────────────────────
 echo ""
 echo "================================================"
 echo " Deployment complete!"
 echo "================================================"
 echo ""
-echo "Fetching your trycloudflare.com URL (from cloudflared logs)..."
-echo "(It may take ~10 seconds to appear)"
+echo "Cloudflared deployed as a named tunnel at chat.xgalvanize.ca"
+echo "Routing comes from k8s/cloudflared-config.yaml plus a Cloudflare DNS CNAME."
 echo ""
-sleep 10
-"${KUBECTL[@]}" logs -n chatbot -l app=chatbot-cloudflared --tail=30 2>/dev/null \
-    | grep -o 'https://[a-zA-Z0-9-]*\.trycloudflare\.com' \
-    || echo "URL not found yet. Run: kubectl --kubeconfig ${KUBECONFIG_PATH} logs -n chatbot -l app=chatbot-cloudflared -f"
-
-echo ""
-echo "To tail the tunnel URL at any time:"
+echo "To inspect tunnel logs:"
 echo "  kubectl --kubeconfig ${KUBECONFIG_PATH} logs -n chatbot -l app=chatbot-cloudflared -f"
 echo ""
 echo "To check pod status:"

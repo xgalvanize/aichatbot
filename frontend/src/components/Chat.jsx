@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import './Chat.css'
 
-const WELCOME = 'Hello! I\'m Gemma 3n E4B, your AI assistant. How can I help you today?'
+const WELCOME = 'Hello! I\'m Phi4 Mini, your AI assistant. How can I help you today?'
 
 export default function Chat({ accessToken, onAuthExpired }) {
   const [messages, setMessages] = useState([
@@ -215,7 +215,7 @@ export default function Chat({ accessToken, onAuthExpired }) {
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Message Qwen… (Enter to send, Shift+Enter for newline)"
+          placeholder="Message Phi4… (Enter to send, Shift+Enter for newline)"
           rows={1}
           disabled={streaming}
         />
