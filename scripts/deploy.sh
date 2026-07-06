@@ -2,7 +2,14 @@
 # deploy.sh — Build locally, load into remote k3s, and deploy chatbot
 # Usage: ./scripts/deploy.sh
 # Optional overrides:
-#   OLLAMA_BASE_URL=http://10.0.0.141:11434 KUBECONFIG_PATH=/home/borg/.kube/k3s-remote NODE_SSH_HOST=thunderball ./scripts/deploy.sh
+#   OLLAMA_BASE_URL=http://10.0.0.141:11434 \
+#   KUBECONFIG_PATH=/home/borg/.kube/k3s-remote \
+#   NODE_SSH_HOST=thunderball \
+#   VITE_FIREBASE_API_KEY=... \
+#   VITE_FIREBASE_AUTH_DOMAIN=... \
+#   VITE_FIREBASE_PROJECT_ID=... \
+#   VITE_FIREBASE_APP_ID=... \
+#   ./scripts/deploy.sh
 
 set -euo pipefail
 
@@ -14,16 +21,23 @@ NODE_SSH_HOST="${NODE_SSH_HOST:-thunderball}"
 KUBECTL=(kubectl --kubeconfig "${KUBECONFIG_PATH}")
 FRONTEND_IMAGE="chatbot-frontend:latest"
 BACKEND_IMAGE="chatbot-backend:latest"
-IDENTITY_IMAGE="chatbot-identity:latest"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 K8S_DIR="${REPO_ROOT}/k8s"
+
+# Firebase web app config — public values baked into the browser bundle at build time.
+# These are NOT secrets; safe to commit.
+VITE_FIREBASE_API_KEY="${VITE_FIREBASE_API_KEY:-AIzaSyCh5AhYDh2EUW7JKeb87JCcY6pRNJRIt2s}"
+VITE_FIREBASE_AUTH_DOMAIN="${VITE_FIREBASE_AUTH_DOMAIN:-identity-ceef0.firebaseapp.com}"
+VITE_FIREBASE_PROJECT_ID="${VITE_FIREBASE_PROJECT_ID:-identity-ceef0}"
+VITE_FIREBASE_APP_ID="${VITE_FIREBASE_APP_ID:-1:835940581305:web:d80764db71a1108ddc0068}"
 
 echo "================================================"
 echo " Chatbot Deploy Script"
 echo " Ollama   : ${OLLAMA_BASE_URL}"
 echo " Kubeconf : ${KUBECONFIG_PATH}"
 echo " Node SSH : ${NODE_SSH_HOST}"
+echo " Firebase : ${VITE_FIREBASE_PROJECT_ID:-<not set>}"
 echo "================================================"
 echo ""
 
@@ -126,15 +140,16 @@ fi
 # ── Build images locally ───────────────────────────────────────────────────────
 echo ""
 echo "▶ Building frontend image..."
-docker build -t "${FRONTEND_IMAGE}" "${REPO_ROOT}/frontend"
+docker build \
+  --build-arg "VITE_FIREBASE_API_KEY=${VITE_FIREBASE_API_KEY}" \
+  --build-arg "VITE_FIREBASE_AUTH_DOMAIN=${VITE_FIREBASE_AUTH_DOMAIN}" \
+  --build-arg "VITE_FIREBASE_PROJECT_ID=${VITE_FIREBASE_PROJECT_ID}" \
+  --build-arg "VITE_FIREBASE_APP_ID=${VITE_FIREBASE_APP_ID}" \
+  -t "${FRONTEND_IMAGE}" "${REPO_ROOT}/frontend"
 
 echo ""
 echo "▶ Building backend image..."
 docker build -t "${BACKEND_IMAGE}" "${REPO_ROOT}/backend"
-
-echo ""
-echo "▶ Building identity image..."
-docker build -t "${IDENTITY_IMAGE}" "${REPO_ROOT}/identity"
 
 # ── Load images into remote k3s runtime (no registry) ─────────────────────────
 echo ""
@@ -143,7 +158,7 @@ LOCAL_ARCHIVE="$(mktemp /tmp/chatbot-images-XXXXXX.tar)"
 REMOTE_ARCHIVE="/tmp/$(basename "${LOCAL_ARCHIVE}")"
 
 echo "▶ Creating local image archive..."
-docker save -o "${LOCAL_ARCHIVE}" "${FRONTEND_IMAGE}" "${BACKEND_IMAGE}" "${IDENTITY_IMAGE}"
+docker save -o "${LOCAL_ARCHIVE}" "${FRONTEND_IMAGE}" "${BACKEND_IMAGE}"
 
 echo "▶ Copying archive to ${NODE_SSH_HOST}..."
 scp "${LOCAL_ARCHIVE}" "${NODE_SSH_HOST}:${REMOTE_ARCHIVE}"
@@ -158,24 +173,23 @@ echo "▶ Applying Kubernetes manifests..."
 
 # Namespace first
 "${KUBECTL[@]}" apply -f "${K8S_DIR}/namespace.yaml"
-"${KUBECTL[@]}" apply -f "${K8S_DIR}/identity-namespace.yaml"
 
-# Apply remaining manifests with OLLAMA_BASE_URL substituted
+# Apply remaining manifests with placeholder substitutions
 for manifest in backend.yaml frontend.yaml cloudflared.yaml; do
 	sed -e "s|__OLLAMA_BASE_URL__|${OLLAMA_BASE_URL}|g" \
 	-e "s|__OLLAMA_MODEL__|${OLLAMA_MODEL}|g" \
 		"${K8S_DIR}/${manifest}" | "${KUBECTL[@]}" apply -f -
 done
 
-"${KUBECTL[@]}" apply -f "${K8S_DIR}/identity-mongodb.yaml"
-"${KUBECTL[@]}" apply -f "${K8S_DIR}/identity-auth.yaml"
-"${KUBECTL[@]}" apply -f "${K8S_DIR}/identity-networkpolicy.yaml"
+# ── Tear down the old in-cluster identity namespace if it still exists ────────
+echo ""
+echo "▶ Removing legacy identity namespace (if present)..."
+"${KUBECTL[@]}" delete namespace identity --ignore-not-found=true
 
 # Force app pods to pick up freshly imported local images (latest tag).
 "${KUBECTL[@]}" -n chatbot rollout restart deployment/chatbot-backend
 "${KUBECTL[@]}" -n chatbot rollout restart deployment/chatbot-frontend
 "${KUBECTL[@]}" -n chatbot rollout restart deployment/chatbot-cloudflared
-"${KUBECTL[@]}" -n identity rollout restart deployment/identity-api
 
 # ── Wait for rollout ───────────────────────────────────────────────────────────
 echo ""
@@ -183,8 +197,6 @@ echo "▶ Waiting for deployments to be ready..."
 "${KUBECTL[@]}" rollout status deployment/chatbot-backend   -n chatbot --timeout=120s
 "${KUBECTL[@]}" rollout status deployment/chatbot-frontend  -n chatbot --timeout=120s
 "${KUBECTL[@]}" rollout status deployment/chatbot-cloudflared -n chatbot --timeout=60s
-"${KUBECTL[@]}" rollout status statefulset/mongodb -n identity --timeout=180s
-"${KUBECTL[@]}" rollout status deployment/identity-api -n identity --timeout=180s
 
 # ── Deployment summary ─────────────────────────────────────────────────────────
 echo ""
