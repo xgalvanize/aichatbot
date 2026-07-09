@@ -7,6 +7,7 @@ const AUTH_STORAGE_KEY = 'chatbot_auth_tokens'
 
 function App() {
   const [showAuthPanel, setShowAuthPanel] = useState(false)
+  const [authMode, setAuthMode] = useState('signin')
   const [authTokens, setAuthTokens] = useState(() => {
     try {
       const raw = localStorage.getItem(AUTH_STORAGE_KEY)
@@ -46,6 +47,11 @@ function App() {
   const handleAuthSuccess = (tokens) => {
     persistTokens(tokens)
     setShowAuthPanel(false)
+  }
+
+  const openAuthPanel = (mode) => {
+    setAuthMode(mode)
+    setShowAuthPanel(true)
   }
 
   const handleSignout = async () => {
@@ -104,9 +110,14 @@ function App() {
               Sign out
             </button>
           ) : (
-            <button className="header-btn" onClick={() => setShowAuthPanel(true)}>
-              Sign in
-            </button>
+            <>
+              <button className="header-btn secondary" onClick={() => openAuthPanel('signin')}>
+                Sign in
+              </button>
+              <button className="header-btn" onClick={() => openAuthPanel('signup')}>
+                Sign up
+              </button>
+            </>
           )}
         </div>
       </header>
@@ -121,7 +132,7 @@ function App() {
               <button className="auth-modal-close" onClick={() => setShowAuthPanel(false)} aria-label="Close auth dialog">
                 ✕
               </button>
-              <AuthPanel onAuthSuccess={handleAuthSuccess} />
+              <AuthPanel key={authMode} initialMode={authMode} onAuthSuccess={handleAuthSuccess} />
             </div>
           </div>
         )}

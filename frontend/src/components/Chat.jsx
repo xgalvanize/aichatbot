@@ -11,6 +11,7 @@ export default function Chat({ accessToken, onAuthExpired }) {
   const [streaming, setStreaming] = useState(false)
   const [error, setError] = useState(null)
   const [copiedCodeIndex, setCopiedCodeIndex] = useState(null)
+  const [topicCard, setTopicCard] = useState(null)
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
   const abortRef = useRef(null)
@@ -19,6 +20,49 @@ export default function Chat({ accessToken, onAuthExpired }) {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
+  const fetchTopicCard = async (userMessage) => {
+    const stopwords = new Set([
+      'a','an','the','is','are','was','were','be','been','have','has','had',
+      'do','does','did','will','would','shall','should','may','might','must',
+      'can','could','what','which','who','when','where','why','how','i','me',
+      'my','we','our','you','your','he','him','his','she','her','it','its',
+      'they','them','their','this','that','these','those','tell','explain',
+      'describe','about','please','hi','hello','hey','thanks','thank','and',
+      'or','but','so','if','then','with','of','to','for','in','on','at','by',
+      'from','as','into','give','want','need','like','know','think','get',
+      'go','see','say','just','also','very','some','all','any','not','no',
+    ])
+    const words = userMessage.toLowerCase().match(/\b[a-z]+\b/g) || []
+    const significant = words.filter(w => !stopwords.has(w) && w.length > 2)
+    if (significant.length === 0) return
+    const query = significant.slice(0, 4).join(' ')
+
+    try {
+      const searchRes = await fetch(
+        `https://en.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(query)}&limit=1&format=json&origin=*`
+      )
+      const [, titles] = await searchRes.json()
+      if (!titles.length) return
+
+      const summaryRes = await fetch(
+        `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(titles[0])}`
+      )
+      if (!summaryRes.ok) return
+      const data = await summaryRes.json()
+
+      if (data.thumbnail?.source) {
+        setTopicCard({
+          title: data.title,
+          thumbnail: data.thumbnail.source,
+          extract: data.extract,
+          url: data.content_urls?.desktop?.page,
+        })
+      }
+    } catch {
+      // silently fail — don't interrupt chat
+    }
+  }
+
   const sendMessage = async () => {
     const text = input.trim()
     if (!text || streaming) return
@@ -26,6 +70,7 @@ export default function Chat({ accessToken, onAuthExpired }) {
     setError(null)
     setInput('')
 
+    fetchTopicCard(text)
     const userMsg = { role: 'user', content: text }
     const history = [...messages, userMsg]
     setMessages([...history, { role: 'assistant', content: '' }])
@@ -132,6 +177,7 @@ export default function Chat({ accessToken, onAuthExpired }) {
     if (streaming) abortRef.current?.abort()
     setMessages([{ role: 'assistant', content: WELCOME }])
     setError(null)
+    setTopicCard(null)
   }
 
   const handleKeyDown = (e) => {
@@ -204,6 +250,26 @@ export default function Chat({ accessToken, onAuthExpired }) {
           <div ref={bottomRef} />
         </div>
       </div>
+
+      {topicCard && (
+        <div className="topic-card">
+          <img src={topicCard.thumbnail} alt={topicCard.title} />
+          <div className="topic-card-body">
+            <div className="topic-card-title">{topicCard.title}</div>
+            <p className="topic-card-extract">{topicCard.extract}</p>
+            {topicCard.url && (
+              <a href={topicCard.url} target="_blank" rel="noreferrer" className="topic-card-link">
+                Wikipedia →
+              </a>
+            )}
+          </div>
+          <button
+            className="topic-card-close"
+            onClick={() => setTopicCard(null)}
+            title="Dismiss"
+          >✕</button>
+        </div>
+      )}
 
       <div className="input-bar">
         <button className="clear-btn" onClick={clearChat} title="Clear chat">

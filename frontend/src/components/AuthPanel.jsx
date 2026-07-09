@@ -25,8 +25,8 @@ function firebaseErrorMessage(err) {
   }
 }
 
-export default function AuthPanel({ onAuthSuccess }) {
-  const [mode, setMode] = useState('signin')
+export default function AuthPanel({ onAuthSuccess, initialMode = 'signin' }) {
+  const [mode, setMode] = useState(initialMode)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [displayName, setDisplayName] = useState('')
