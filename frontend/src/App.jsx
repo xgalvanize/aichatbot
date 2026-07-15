@@ -100,8 +100,10 @@ function App() {
     <div className="app">
       <header className="app-header">
         <div className="header-content">
-          <span className="logo">⚡</span>
-          <h1>Phi4 Chat</h1>
+          <a href="https://xgalvanize.ca" className="app-logo" target="_blank" rel="noreferrer">
+            <span className="logo-bracket">&lt;</span>XG<span className="logo-bracket">/&gt;</span>
+          </a>
+          <h1>Chat</h1>
           <span className="model-badge">phi4-mini</span>
         </div>
         <div className="auth-actions">

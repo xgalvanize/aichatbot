@@ -6,8 +6,8 @@
 }
 
 .app-header {
-  background: #1a1a1a;
-  border-bottom: 1px solid #2a2a2a;
+  background: #040810;
+  border-bottom: 1px solid #0d1828;
   padding: 0 1.5rem;
   height: 56px;
   display: flex;
@@ -16,55 +16,66 @@
   justify-content: space-between;
 }
 
+.app-logo {
+  font-size: 1.1rem;
+  font-weight: 700;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  text-decoration: none;
+  color: #8ab0c4;
+  letter-spacing: -0.02em;
+  flex-shrink: 0;
+}
+
+.logo-bracket { color: #00d9ff; }
+
 .header-content {
   display: flex;
   align-items: center;
   gap: 0.6rem;
-}
-
-.logo {
-  font-size: 1.3rem;
+  min-width: 0;
 }
 
 .app-header h1 {
   font-size: 1.1rem;
   font-weight: 600;
-  color: #fff;
+  color: #8ab0c4;
 }
 
 .model-badge {
-  background: #2d2d5e;
-  color: #a78bfa;
+  background: rgba(0, 217, 255, 0.06);
+  color: #00d9ff;
   font-size: 0.72rem;
   font-weight: 500;
   padding: 2px 8px;
-  border-radius: 999px;
-  border: 1px solid #3d3d7e;
+  border-radius: 3px;
+  border: 1px solid rgba(0, 217, 255, 0.2);
 }
 
 .auth-actions {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  flex-shrink: 0;
 }
 
 .header-btn {
   background: transparent;
-  border: 1px solid #383838;
-  color: #d4d4d4;
-  border-radius: 10px;
+  border: 1px solid #0d1828;
+  color: #4a6878;
+  border-radius: 4px;
   font-size: 0.82rem;
   padding: 0.4rem 0.7rem;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .header-btn:hover {
-  border-color: #5a5a5a;
-  color: #ffffff;
+  border-color: rgba(0, 217, 255, 0.3);
+  color: #00d9ff;
 }
 
 .header-btn.secondary {
-  border-color: #2f2f2f;
+  border-color: #0d1828;
 }
 
 .app-main {
@@ -77,7 +88,7 @@
 .auth-modal-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(10, 10, 10, 0.72);
+  background: rgba(2, 3, 8, 0.88);
   display: grid;
   place-items: center;
   padding: 1rem;
@@ -98,18 +109,18 @@
   top: 0.9rem;
   right: 0.9rem;
   z-index: 2;
-  border: 1px solid #3a3a3a;
-  background: #171717;
-  color: #ddd;
+  border: 1px solid #0d1828;
+  background: #040810;
+  color: #4a6878;
   width: 30px;
   height: 30px;
-  border-radius: 8px;
+  border-radius: 4px;
   cursor: pointer;
 }
 
 .auth-modal-close:hover {
-  border-color: #5a5a5a;
-  color: #fff;
+  border-color: rgba(0, 217, 255, 0.3);
+  color: #00d9ff;
 }
 
 @media (max-width: 768px) {
@@ -138,5 +149,25 @@
 
   .auth-modal {
     width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .model-badge {
+    display: none;
+  }
+
+  .app-header h1 {
+    font-size: 0.9rem;
+  }
+
+  .header-btn {
+    font-size: 0.72rem;
+    padding: 0.28rem 0.48rem;
+    border-radius: 8px;
+  }
+
+  .auth-actions {
+    gap: 0.25rem;
   }
 }

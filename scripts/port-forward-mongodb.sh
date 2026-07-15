@@ -12,7 +12,7 @@ set -euo pipefail
 LOCAL_PORT="${LOCAL_PORT:-27017}"
 REMOTE_PORT="${REMOTE_PORT:-27017}"
 RESOURCE="${RESOURCE:-pod/mongodb-0}"
-NAMESPACE="${NAMESPACE:-identity}"
+#NAMESPACE="${NAMESPACE:-identity}"
 KUBECONFIG_PATH="${KUBECONFIG_PATH:-/home/borg/.kube/k3s-remote}"
 
 if command -v ss >/dev/null 2>&1; then

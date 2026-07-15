@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import './Chat.css'
 
-const WELCOME = 'Hello! I\'m Phi4 Mini, your AI assistant. How can I help you today?'
+const WELCOME = 'Hello! I\'m XGalvanize, your AI assistant. How can I help you today?'
 
 export default function Chat({ accessToken, onAuthExpired }) {
   const [messages, setMessages] = useState([
@@ -32,10 +32,14 @@ export default function Chat({ accessToken, onAuthExpired }) {
       'from','as','into','give','want','need','like','know','think','get',
       'go','see','say','just','also','very','some','all','any','not','no',
     ])
-    const words = userMessage.toLowerCase().match(/\b[a-z]+\b/g) || []
-    const significant = words.filter(w => !stopwords.has(w) && w.length > 2)
+    // Match from original message to preserve proper-noun casing and include numbers
+    const words = userMessage.match(/\b[\w]+\b/g) || []
+    const significant = words.filter(w => {
+      const lower = w.toLowerCase()
+      return !stopwords.has(lower) && lower.length > 1
+    })
     if (significant.length === 0) return
-    const query = significant.slice(0, 4).join(' ')
+    const query = significant.slice(0, 5).join(' ')
 
     try {
       const searchRes = await fetch(
@@ -281,7 +285,7 @@ export default function Chat({ accessToken, onAuthExpired }) {
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Message Phi4… (Enter to send, Shift+Enter for newline)"
+          placeholder="Message XGalvanize... (Enter to send, Shift+Enter for newline)"
           rows={1}
           disabled={streaming}
         />

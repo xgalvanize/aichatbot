@@ -123,15 +123,52 @@ probe_ollama_chat() {
 	ssh "${NODE_SSH_HOST}" "curl -fsS --max-time 120 -H 'Content-Type: application/json' -X POST '${OLLAMA_BASE_URL}/api/chat' -d '{\"model\":\"${OLLAMA_MODEL}\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with the single word: pong\"}],\"stream\":false,\"options\":{\"num_predict\":8}}' | grep -q '\"done\":true'"
 }
 
+# Run the probe but capture the response body for diagnostics on failure.
+probe_ollama_chat_verbose() {
+	local response
+	response=$(ssh "${NODE_SSH_HOST}" "curl -sS --max-time 120 -w '\n__HTTP_CODE__%{http_code}' -H 'Content-Type: application/json' -X POST '${OLLAMA_BASE_URL}/api/chat' -d '{\"model\":\"${OLLAMA_MODEL}\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with the single word: pong\"}],\"stream\":false,\"options\":{\"num_predict\":8}}'")
+	local http_code
+	http_code=$(echo "${response}" | grep '__HTTP_CODE__' | sed 's/__HTTP_CODE__//')
+	local body
+	body=$(echo "${response}" | grep -v '__HTTP_CODE__')
+
+	if echo "${body}" | grep -q '"done":true'; then
+		return 0
+	fi
+
+	echo "  HTTP ${http_code}: ${body}" >&2
+
+	# Diagnose common causes.
+	if echo "${body}" | grep -qi 'vk::\|vulkan\|ErrorInitializationFailed\|error loading model'; then
+		echo "" >&2
+		echo "  ── GPU / Vulkan diagnosis ──────────────────────────────────────" >&2
+		ssh "${NODE_SSH_HOST}" "
+			if command -v nvidia-smi &>/dev/null; then
+				echo '  VRAM:' \$(nvidia-smi --query-gpu=memory.used,memory.free --format=csv,noheader)
+				PROCS=\$(lsof /dev/nvidia* 2>/dev/null | awk 'NR>1{print \$1,\$2}' | sort -u | head -10)
+				if [ -n \"\${PROCS}\" ]; then
+					echo '  Processes holding GPU memory:'
+					echo \"\${PROCS}\" | sed 's/^/    /'
+				fi
+			fi
+		" >&2
+		echo "  ────────────────────────────────────────────────────────────────" >&2
+		echo "  Hint: free up GPU VRAM (close games / other GPU apps) or set OLLAMA_NUM_GPU=0 to force CPU inference." >&2
+	fi
+	return 1
+}
+
 echo "▶ Checking Ollama chat health on ${NODE_SSH_HOST}..."
 if probe_ollama_chat; then
     echo "✓ Ollama chat health check passed"
 else
     echo "⚠ Ollama health check failed. Restarting Ollama service..."
     ssh -t "${NODE_SSH_HOST}" 'sudo systemctl restart ollama'
+    sleep 8
     echo "▶ Rechecking Ollama chat health..."
-    if ! probe_ollama_chat; then
-        echo "✖ Ollama is still unhealthy after restart. Fix Ollama on ${NODE_SSH_HOST} and rerun deploy."
+    if ! probe_ollama_chat_verbose; then
+        echo ""
+        echo "✖ Ollama is still unhealthy after restart. See diagnostics above."
         exit 1
     fi
     echo "✓ Ollama recovered after restart"
