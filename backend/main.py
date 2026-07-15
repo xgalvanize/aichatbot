@@ -112,7 +112,7 @@ class ChatRequest(BaseModel):
 @app.get("/api/health")
 async def health():
     """Liveness/readiness probe used by Kubernetes and the deploy script."""
-    return {"status": "ok", "ollama": OLLAMA_BASE_URL}
+    return {"status": "ok", "model": DEFAULT_MODEL}
 
 
 @app.post("/api/chat")
