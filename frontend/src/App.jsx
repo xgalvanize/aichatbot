@@ -103,7 +103,7 @@ function App() {
           <a href="https://xgalvanize.ca" className="app-logo" target="_blank" rel="noreferrer">
             <span className="logo-bracket">&lt;</span>XG<span className="logo-bracket">/&gt;</span>
           </a>
-          <h1>Chat</h1>
+          <h1>AI Chat</h1>
           <span className="model-badge">phi4-mini</span>
         </div>
         <div className="auth-actions">
