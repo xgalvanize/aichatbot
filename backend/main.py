@@ -17,6 +17,7 @@ import re
 import json
 import asyncio
 import httpx
+from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -24,6 +25,10 @@ from pydantic import BaseModel, field_validator
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from motor.motor_asyncio import AsyncIOMotorClient
+from jose import JWTError, jwt
+from bson import ObjectId
+from bson.errors import InvalidId
 
 limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(title="Chatbot API")
@@ -68,6 +73,51 @@ OLLAMA_TEMPERATURE = float(os.getenv("OLLAMA_TEMPERATURE", "0.35"))
 OLLAMA_TOP_P = float(os.getenv("OLLAMA_TOP_P", "0.92"))
 OLLAMA_NUM_PREDICT = int(os.getenv("OLLAMA_NUM_PREDICT", "384"))
 
+# MongoDB for chat history. Optional — history is silently disabled when unset.
+CHATBOT_MONGO_URI = os.getenv("CHATBOT_MONGO_URI", "")
+
+# JWT verification — must match the identity service so access tokens can be
+# decoded here without an extra round-trip.
+JWT_SECRET    = os.getenv("JWT_SECRET", "")
+JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
+JWT_AUDIENCE  = os.getenv("JWT_AUDIENCE", "global-apps")
+
+# ── MongoDB client (initialised at startup) ───────────────────────────────────
+_mongo_client: AsyncIOMotorClient | None = None
+_chat_db = None
+
+
+@app.on_event("startup")
+async def _startup() -> None:
+    global _mongo_client, _chat_db
+    if CHATBOT_MONGO_URI:
+        _mongo_client = AsyncIOMotorClient(CHATBOT_MONGO_URI)
+        _chat_db = _mongo_client["chatbot"]
+        await _chat_db.conversations.create_index(
+            [("user_id", 1), ("updated_at", -1)]
+        )
+        await _chat_db.messages.create_index(
+            [("conversation_id", 1), ("created_at", 1)]
+        )
+
+
+async def _get_user_id(request: Request) -> str | None:
+    """Decode the JWT in the Authorization header and return the `sub` claim.
+    Returns None when the token is absent, malformed, or the secret is unconfigured."""
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer ") or not JWT_SECRET:
+        return None
+    try:
+        payload = jwt.decode(
+            auth[7:], JWT_SECRET,
+            algorithms=[JWT_ALGORITHM],
+            audience=JWT_AUDIENCE,
+        )
+        return payload.get("sub")
+    except JWTError:
+        return None
+
+
 # Incoming chat request body. `messages` follows the OpenAI-style role/content
 # format that Ollama accepts directly. `model` defaults to DEFAULT_MODEL but can
 # be overridden by the client (e.g. for a model-selector UI).
@@ -101,12 +151,33 @@ class ChatRequest(BaseModel):
             cleaned.append({"role": role, "content": content})
         return cleaned
 
+    conversation_id: str | None = None
+
     @field_validator("model")
     @classmethod
     def validate_model(cls, v: str) -> str:
         if not re.match(r"^[\w.:\-]{1,100}$", v):
             raise ValueError("invalid model name")
         return v
+
+    @field_validator("conversation_id")
+    @classmethod
+    def validate_conversation_id(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        try:
+            ObjectId(v)
+            return v
+        except (InvalidId, Exception):
+            raise ValueError("invalid conversation_id")
+
+
+class ConversationCreate(BaseModel):
+    title: str
+
+
+class ConversationRename(BaseModel):
+    title: str
 
 
 @app.get("/api/health")
@@ -115,9 +186,116 @@ async def health():
     return {"status": "ok", "model": DEFAULT_MODEL}
 
 
+# ── Conversation history endpoints ────────────────────────────────────────────
+
+@app.get("/api/conversations")
+async def list_conversations(request: Request):
+    user_id = await _get_user_id(request)
+    if not user_id or _chat_db is None:
+        return []
+    cursor = (
+        _chat_db.conversations
+        .find({"user_id": user_id}, {"_id": 1, "title": 1, "updated_at": 1})
+        .sort("updated_at", -1)
+        .limit(5)
+    )
+    result = []
+    async for doc in cursor:
+        result.append({
+            "id": str(doc["_id"]),
+            "title": doc["title"],
+            "updated_at": doc["updated_at"].isoformat(),
+        })
+    return result
+
+
+@app.post("/api/conversations")
+async def create_conversation(request: Request, body: ConversationCreate):
+    user_id = await _get_user_id(request)
+    if not user_id or _chat_db is None:
+        raise HTTPException(status_code=403, detail="Authentication required")
+    title = body.title.strip()[:80] or "New Chat"
+    now = datetime.now(timezone.utc)
+    result = await _chat_db.conversations.insert_one({
+        "user_id": user_id,
+        "title": title,
+        "created_at": now,
+        "updated_at": now,
+    })
+    # Keep only the 5 most recent conversations — delete any older ones.
+    all_ids = await _chat_db.conversations.find(
+        {"user_id": user_id}, {"_id": 1}
+    ).sort("updated_at", -1).to_list(None)
+    if len(all_ids) > 5:
+        old_ids = [doc["_id"] for doc in all_ids[5:]]
+        await _chat_db.conversations.delete_many({"_id": {"$in": old_ids}, "user_id": user_id})
+        await _chat_db.messages.delete_many({"conversation_id": {"$in": [str(i) for i in old_ids]}})
+    return {"id": str(result.inserted_id), "title": title}
+
+
+@app.delete("/api/conversations/{conv_id}")
+async def delete_conversation(conv_id: str, request: Request):
+    user_id = await _get_user_id(request)
+    if not user_id or _chat_db is None:
+        raise HTTPException(status_code=403, detail="Authentication required")
+    try:
+        oid = ObjectId(conv_id)
+    except (InvalidId, Exception):
+        raise HTTPException(status_code=400, detail="Invalid conversation id")
+    res = await _chat_db.conversations.delete_one({"_id": oid, "user_id": user_id})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Not found")
+    await _chat_db.messages.delete_many({"conversation_id": conv_id})
+    return {"ok": True}
+
+
+@app.patch("/api/conversations/{conv_id}/title")
+async def rename_conversation(conv_id: str, request: Request, body: ConversationRename):
+    user_id = await _get_user_id(request)
+    if not user_id or _chat_db is None:
+        raise HTTPException(status_code=403, detail="Authentication required")
+    title = body.title.strip()[:80]
+    if not title:
+        raise HTTPException(status_code=400, detail="Title required")
+    try:
+        oid = ObjectId(conv_id)
+    except (InvalidId, Exception):
+        raise HTTPException(status_code=400, detail="Invalid conversation id")
+    res = await _chat_db.conversations.update_one(
+        {"_id": oid, "user_id": user_id},
+        {"$set": {"title": title, "updated_at": datetime.now(timezone.utc)}},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Not found")
+    return {"ok": True}
+
+
+@app.get("/api/conversations/{conv_id}/messages")
+async def get_conversation_messages(conv_id: str, request: Request):
+    user_id = await _get_user_id(request)
+    if not user_id or _chat_db is None:
+        raise HTTPException(status_code=403, detail="Authentication required")
+    try:
+        oid = ObjectId(conv_id)
+    except (InvalidId, Exception):
+        raise HTTPException(status_code=400, detail="Invalid conversation id")
+    conv = await _chat_db.conversations.find_one({"_id": oid, "user_id": user_id})
+    if not conv:
+        raise HTTPException(status_code=404, detail="Not found")
+    cursor = _chat_db.messages.find(
+        {"conversation_id": conv_id}
+    ).sort("created_at", 1)
+    msgs = []
+    async for doc in cursor:
+        msgs.append({"role": doc["role"], "content": doc["content"]})
+    return msgs
+
+
 @app.post("/api/chat")
 @limiter.limit("10/minute")
 async def chat(request: Request, payload: ChatRequest):
+    user_id = await _get_user_id(request)
+
     """
     Stream a chat completion from Ollama as Server-Sent Events.
 
@@ -193,6 +371,7 @@ async def chat(request: Request, payload: ChatRequest):
         # Start the Ollama reader as a concurrent task so the SSE generator
         # can yield keepalives while waiting for the model to produce tokens.
         pump_task = asyncio.create_task(pump_ollama())
+        _response_tokens: list[str] = []
 
         try:
             while True:
@@ -211,6 +390,14 @@ async def chat(request: Request, payload: ChatRequest):
                     yield f"data: {json.dumps({'error': value})}\n\n"
                     break
 
+                # Accumulate content tokens for history persistence.
+                try:
+                    tok = json.loads(value).get("message", {}).get("content", "")
+                    if tok:
+                        _response_tokens.append(tok)
+                except Exception:
+                    pass
+
                 yield f"data: {value}\n\n"
 
                 if done.is_set() and queue.empty():
@@ -218,6 +405,41 @@ async def chat(request: Request, payload: ChatRequest):
         finally:
             if not pump_task.done():
                 pump_task.cancel()
+
+            # Persist messages to MongoDB — best-effort, never blocks the response.
+            if (
+                user_id
+                and _chat_db is not None
+                and payload.conversation_id
+                and _response_tokens
+                and done.is_set()
+            ):
+                try:
+                    full_response = "".join(_response_tokens)
+                    now = datetime.now(timezone.utc)
+                    user_msgs = [m for m in payload.messages if m["role"] == "user"]
+                    if user_msgs:
+                        await _chat_db.messages.insert_one({
+                            "conversation_id": payload.conversation_id,
+                            "role": "user",
+                            "content": user_msgs[-1]["content"],
+                            "created_at": now,
+                        })
+                    await _chat_db.messages.insert_one({
+                        "conversation_id": payload.conversation_id,
+                        "role": "assistant",
+                        "content": full_response,
+                        "created_at": datetime.now(timezone.utc),
+                    })
+                    await _chat_db.conversations.update_one(
+                        {
+                            "_id": ObjectId(payload.conversation_id),
+                            "user_id": user_id,
+                        },
+                        {"$set": {"updated_at": datetime.now(timezone.utc)}},
+                    )
+                except Exception:
+                    pass  # history is best-effort
 
     return StreamingResponse(
         stream_response(),

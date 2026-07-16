@@ -5,6 +5,14 @@
   min-height: 0;
 }
 
+.history-loading {
+  text-align: center;
+  font-size: 0.78rem;
+  color: #1a3040;
+  padding: 0.5rem;
+  flex-shrink: 0;
+}
+
 /* ── Messages ── */
 .messages-wrapper {
   flex: 1;

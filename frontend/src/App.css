@@ -78,8 +78,29 @@
   border-color: #0d1828;
 }
 
+.sidebar-toggle-btn {
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0.3rem 0.5rem;
+  border-color: transparent;
+  color: #3a5a6a;
+}
+
+.sidebar-toggle-btn:hover {
+  color: #00d9ff;
+  border-color: transparent;
+}
+
 .app-main {
   flex: 1;
+  overflow: hidden;
+  min-height: 0;
+  position: relative;
+}
+
+.app-body {
+  flex: 1;
+  display: flex;
   overflow: hidden;
   min-height: 0;
   position: relative;

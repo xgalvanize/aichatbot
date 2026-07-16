@@ -211,6 +211,10 @@ echo "▶ Applying Kubernetes manifests..."
 # Namespace first
 "${KUBECTL[@]}" apply -f "${K8S_DIR}/namespace.yaml"
 
+# Secrets and stateful resources (applied before Deployments)
+"${KUBECTL[@]}" apply -f "${K8S_DIR}/secrets.yaml"
+"${KUBECTL[@]}" apply -f "${K8S_DIR}/mongodb.yaml"
+
 # Apply remaining manifests with placeholder substitutions
 for manifest in backend.yaml frontend.yaml cloudflared.yaml; do
 	sed -e "s|__OLLAMA_BASE_URL__|${OLLAMA_BASE_URL}|g" \

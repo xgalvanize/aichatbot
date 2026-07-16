@@ -23,3 +23,4 @@ frontend/dist/
 # Env / secrets
 .env
 .env.*
+k8s/secrets.yaml

@@ -3,7 +3,7 @@ import './Chat.css'
 
 const WELCOME = 'Hello! I\'m XGalvanize, your AI assistant. How can I help you today?'
 
-export default function Chat({ accessToken, onAuthExpired }) {
+export default function Chat({ accessToken, onAuthExpired, conversationId, onConversationStart, onMessageSent }) {
   const [messages, setMessages] = useState([
     { role: 'assistant', content: WELCOME },
   ])
@@ -12,9 +12,37 @@ export default function Chat({ accessToken, onAuthExpired }) {
   const [error, setError] = useState(null)
   const [copiedCodeIndex, setCopiedCodeIndex] = useState(null)
   const [topicCard, setTopicCard] = useState(null)
+  const [loadingHistory, setLoadingHistory] = useState(false)
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
   const abortRef = useRef(null)
+  const activeConvRef = useRef(conversationId)
+
+  // Load messages when the active conversation changes.
+  useEffect(() => {
+    activeConvRef.current = conversationId
+    if (!conversationId) {
+      setMessages([{ role: 'assistant', content: WELCOME }])
+      setError(null)
+      setTopicCard(null)
+      return
+    }
+    if (!accessToken) return
+    setLoadingHistory(true)
+    fetch(`/api/conversations/${conversationId}/messages`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+      .then(r => r.ok ? r.json() : [])
+      .then(msgs => {
+        // Guard against a race where the user switches conv while loading.
+        if (activeConvRef.current !== conversationId) return
+        setMessages(msgs.length ? msgs : [{ role: 'assistant', content: WELCOME }])
+        setError(null)
+        setTopicCard(null)
+      })
+      .catch(() => {})
+      .finally(() => setLoadingHistory(false))
+  }, [conversationId, accessToken])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -73,10 +101,16 @@ export default function Chat({ accessToken, onAuthExpired }) {
 
     setError(null)
     setInput('')
-
     fetchTopicCard(text)
+
+    // If authenticated and starting a new conversation, create it first.
+    let activeConvId = conversationId
+    if (!activeConvId && accessToken && onConversationStart) {
+      activeConvId = await onConversationStart(text.slice(0, 60))
+    }
+
     const userMsg = { role: 'user', content: text }
-    const history = [...messages, userMsg]
+    const history = [...messages, userMsg].slice(-40)
     setMessages([...history, { role: 'assistant', content: '' }])
     setStreaming(true)
 
@@ -92,7 +126,10 @@ export default function Chat({ accessToken, onAuthExpired }) {
       return fetch('/api/chat', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ messages: history }),
+        body: JSON.stringify({
+          messages: history,
+          ...(activeConvId && { conversation_id: activeConvId }),
+        }),
         signal: controller.signal,
       })
     }
@@ -170,6 +207,7 @@ export default function Chat({ accessToken, onAuthExpired }) {
       setStreaming(false)
       abortRef.current = null
       inputRef.current?.focus()
+      onMessageSent?.(activeConvId ?? null)
     }
   }
 
@@ -218,6 +256,9 @@ export default function Chat({ accessToken, onAuthExpired }) {
 
   return (
     <div className="chat">
+      {loadingHistory && (
+        <div className="history-loading">Loading conversation…</div>
+      )}
       <div className="messages-wrapper">
         <div className="messages">
           {messages.map((msg, i) => (

@@ -39,6 +39,18 @@ spec:
               value: "You are a helpful assistant. Provide clear, practical answers with enough detail to be useful. Prefer concise structure (short paragraphs or bullets) instead of rambling. Do not output internal reasoning or self-talk. If the user asks for a short or exact reply, comply exactly."
             - name: IDENTITY_BASE_URL
               value: "http://identity-api.global-identity.svc.cluster.local:80"
+            - name: CHATBOT_MONGO_URI
+              valueFrom:
+                secretKeyRef:
+                  name: chatbot-secret
+                  key: mongo-uri
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: chatbot-secret
+                  key: jwt-secret
+            - name: JWT_AUDIENCE
+              value: "global-apps"
           readinessProbe:
             httpGet:
               path: /api/health
